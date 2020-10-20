@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"github.com/go-openapi/runtime/middleware"
 	"github.com/go-pg/pg/v10"
+	"github.com/go-pg/pg/v10/orm"
 	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
 	"github.com/hsedjame/product-psql-api/src/main/core"
+	"github.com/hsedjame/product-psql-api/src/main/models"
 	"github.com/hsedjame/product-psql-api/src/main/web"
 	"io/ioutil"
 	"log"
@@ -20,15 +22,14 @@ import (
 )
 
 type App struct {
-	Server *http.Server
-	DB *pg.DB
-	Properties core.AppProperties
-	Log *log.Logger
-	Controllers []web.RestController
-	Classpath string
+	Server        *http.Server
+	DB            *pg.DB
+	Properties    core.AppProperties
+	Log           *log.Logger
+	Controllers   []web.RestController
+	Classpath     string
 	IsInitialized bool
 }
-
 
 // Initialize the application
 func (app *App) Initialize() {
@@ -49,16 +50,16 @@ func (app *App) Initialize() {
 		app.Log.Fatal(err)
 	}
 
-	app.configureServer()
-
 	app.IsInitialized = true
 }
 
 // Run the application
 func (app *App) Run() {
 	if !app.IsInitialized {
-		app.Initialize()
+		app.Log.Fatal("Application is not Initialized")
 	}
+
+	app.configureServer()
 
 	go func() {
 		app.Log.Fatal(app.Server.ListenAndServe())
@@ -67,6 +68,7 @@ func (app *App) Run() {
 	app.shutDown()
 }
 
+// shutDown the application
 func (app *App) shutDown() {
 
 	signalChannel := make(chan os.Signal)
@@ -83,7 +85,7 @@ func (app *App) shutDown() {
 
 	app.Log.Println(" ===> Arrêt du serveur")
 
-	deadline, _ := context.WithTimeout(context.Background(), 30 * time.Second)
+	deadline, _ := context.WithTimeout(context.Background(), 30*time.Second)
 
 	if err := app.DB.Close(); err != nil {
 		app.Log.Fatal(err)
@@ -133,7 +135,7 @@ func (app *App) setAppProperties() (error, string) {
 
 	}
 
-	app.Log.Println(" ===> Application Properties retrieval succeeded.", )
+	app.Log.Println(" ===> Application Properties retrieval succeeded.")
 
 	return nil, ""
 }
@@ -189,6 +191,19 @@ func (app *App) openDatabase() error {
 			} else {
 				app.Log.Println(" ===> Connection to Database succeeded.")
 				app.Log.Printf(" ===> Database version : %s", version)
+
+				mods := []interface{}{
+					(*models.Product)(nil),
+				}
+
+				for _, mod := range mods {
+					if err := app.DB.Model(mod).CreateTable(&orm.CreateTableOptions{
+						Temp:        false,
+						IfNotExists: true,
+					}); err != nil {
+						app.Log.Fatal(err)
+					}
+				}
 			}
 		}
 	} else {
@@ -203,7 +218,7 @@ func (app *App) configureServer() {
 
 	router := mux.NewRouter()
 
-	for _,controller := range app.Controllers {
+	for _, controller := range app.Controllers {
 		subRouter := router.PathPrefix(controller.Path()).Subrouter()
 		subRouter.Use(controller.Middleware)
 		controller.AddRoutes(subRouter)
@@ -241,13 +256,11 @@ func (app *App) configureServer() {
 	}
 
 	app.Server = &http.Server{
-		Addr: fmt.Sprintf(":%d", port),
-		Handler: corsHandlers(router),
-		IdleTimeout:       120 * time.Second,
-		ReadTimeout:       5 * time.Second,
-		WriteTimeout:      10 * time.Second,
+		Addr:         fmt.Sprintf(":%d", port),
+		Handler:      corsHandlers(router),
+		IdleTimeout:  120 * time.Second,
+		ReadTimeout:  5 * time.Second,
+		WriteTimeout: 10 * time.Second,
 	}
 
 }
-
-
